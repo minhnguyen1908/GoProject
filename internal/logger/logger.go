@@ -20,7 +20,7 @@ func Setup(filename string) {
 		Compress:   true, // .gz
 	}
 
-	// 2. Combine Outpusts (Terminal + File)
+	// 2. Combine Outputs (Terminal + File)
 	// We use io.MultiWriter so we can see it live AND save it for later.
 	mw := io.MultiWriter(os.Stdout, logFile)
 

@@ -50,8 +50,8 @@ type Link struct {
 	HRef   string `json:"href"`   // The URL endpoint
 }
 
-// JobResponese wraps the data with HATEOAS links.
-type JobResponese struct {
+// JobResponse wraps the data with HATEOAS links.
+type JobResponse struct {
 	CrawlJob        // Embed the orginal data (Inheritance-ish)
 	Links    []Link `json:"_links"`
 }
@@ -61,7 +61,7 @@ var queueCol *mongo.Collection
 var mongoClient *mongo.Client
 
 // ==========================================
-// Mian function
+// Main function
 // ==========================================
 
 func main() {
@@ -85,7 +85,7 @@ func main() {
 	r.POST("/queue/claim", claimJobHandler)
 	r.PUT("/queue", updateJobHandler)
 
-	// SERVER SETUP (HTTPS + GREACEFUL SHUTDOWN)
+	// SERVER SETUP (HTTPS + GRACEFUL SHUTDOWN)
 
 	// Check for HTTPS Certificates.
 	certFile := "cert.pem"
@@ -230,7 +230,7 @@ func searchJobsHandler(c *gin.Context) {
 		}
 
 		if !allowedKeys[key] {
-			sendResponse(c, http.StatusBadRequest, gin.H{"error": "Invalide filter: " + key})
+			sendResponse(c, http.StatusBadRequest, gin.H{"error": "Invalid filter: " + key})
 			return
 		}
 
@@ -259,13 +259,13 @@ func searchJobsHandler(c *gin.Context) {
 
 	log.Printf("✅ [Search] Found %d jobs matching filter ", len(jobs))
 
-	var JobResources []JobResponese
+	var JobResources []JobResponse
 	for _, job := range jobs {
 		JobResources = append(JobResources, NewJobResponse(job))
 	}
 
 	if JobResources == nil {
-		JobResources = []JobResponese{}
+		JobResources = []JobResponse{}
 	}
 
 	sendResponse(c, http.StatusOK, gin.H{
@@ -510,8 +510,8 @@ func fileExists(filename string) bool {
 // New Helper for HATEOAS Logic.
 // athis function acts like a "Smart Menu Generator".
 // It looks at the job's status and decides what links to show.
-func NewJobResponse(job CrawlJob) JobResponese {
-	res := JobResponese{
+func NewJobResponse(job CrawlJob) JobResponse {
+	res := JobResponse{
 		CrawlJob: job,
 		Links:    []Link{},
 	}
