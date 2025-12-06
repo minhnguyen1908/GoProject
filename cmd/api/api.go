@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	// Import our shared tool (Using project name, not folder name)
@@ -20,11 +23,12 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
-const (
-	// --- CONFIGURATION ---
-	MongoUser = "root"
-	MongoPass = "example"
+var (
+	MongoUser = "something"
+	MongoPass = "somethingElse"
+)
 
+const (
 	// --- Job Statuses ---
 	StatusPending    = "pending"
 	StatusProcessing = "processing"
@@ -65,6 +69,9 @@ func main() {
 	// This creates 'api.log' and connects it to the terminal.
 	logger.Setup("api.log")
 
+	// Load Config from Environment (Security Best Practice)
+	loadConfig()
+
 	// 2. Connect DB
 	initMongo()
 	r := gin.Default()
@@ -78,22 +85,64 @@ func main() {
 	r.POST("/queue/claim", claimJobHandler)
 	r.PUT("/queue", updateJobHandler)
 
-	// Smart HTTPS Support
-	// Check if certificate files exist in the current folder
+	// SERVER SETUP (HTTPS + GREACEFUL SHUTDOWN)
+
+	// Check for HTTPS Certificates.
 	certFile := "cert.pem"
 	keyFile := "key.pem"
+	useTLS := fileExists(certFile) && fileExists(keyFile)
 
-	if fileExists(certFile) && fileExists(keyFile) {
-		log.Println("🔒 Certificates found! Starting Server in HTTPS mode on: 8443")
-		// r.RunTLS starts the server with encryption
-		// Note: We usually use port 443 or 8443 for HTTPS
-		if err := r.RunTLS(":8443", certFile, keyFile); err != nil {
-			log.Fatal("❌ Failed to start HTTPS server: ", err)
-		}
-	} else {
-		log.Println("🔓 No certificates found. Starting Server in HTTP mode on: 8080")
-		r.Run(":8080")
+	// Graceful Shutdown Setup
+	//Create the HTTP server manually so we can control it.
+	srv := &http.Server{
+		Addr:    ":8080",
+		Handler: r,
 	}
+
+	if useTLS {
+		srv.Addr = ":8443" // Standard HTTPS alt port
+		log.Println("🔒 Certificates found! Starting in HTTPS mode on: 8443")
+
+		// Run the server in a separate Goroutine so it doesn't block
+		go func() {
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("❌ Server Listen Error: %s\n", err)
+			}
+		}()
+	} else {
+		srv.Addr = ":8080"
+		log.Println("🔓 No certs found. Starting in HTTP mode on: 8080")
+		go func() {
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("❌ Server Listen Error: %s\n", err)
+			}
+		}()
+	}
+
+	// Wait for interrupt signal to gracefully shutdown the server with a timeout of 5 seconds.
+	quit := make(chan os.Signal, 1)
+
+	// signal.Notify tell Go: "if you see SIGINT (Ctrl + C) or SIGTERM (Docker Stop), sent it to 'quit' channel".
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+
+	// athis line BLOCKS until a signal is received.
+	<-quit
+	log.Println("🛑 Shutting down server...")
+
+	// The context is use to inform the server it has 5 seconds to finish the request it is currently handling.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatal("❌ Server Forced to Shutdown: ", err)
+	}
+
+	// Disconnect Mongo safely
+	if err := mongoClient.Disconnect(ctx); err != nil {
+		log.Printf("⚠️ Mongo Disconnect Error: %v", err)
+	}
+
+	log.Println("👋 Server exiting")
 }
 
 // ==========================================
@@ -141,7 +190,7 @@ func enqueueHandler(c *gin.Context) {
 	job.Status = StatusPending
 	job.CreatedAt = time.Now()
 
-	_, err := queueCol.InsertOne(context.TODO(), job)
+	_, err := queueCol.InsertOne(c.Request.Context(), job)
 
 	if err != nil {
 		if mongo.IsDuplicateKeyError(err) {
@@ -196,14 +245,14 @@ func searchJobsHandler(c *gin.Context) {
 		}
 	}
 
-	cursor, err := queueCol.Find(context.TODO(), filter)
+	cursor, err := queueCol.Find(c.Request.Context(), filter)
 	if handleDBError(c, err, "Mongo Search Error") {
 		return
 	}
 
-	defer cursor.Close(context.TODO())
+	defer cursor.Close(c.Request.Context())
 
-	err = cursor.All(context.TODO(), &jobs)
+	err = cursor.All(c.Request.Context(), &jobs)
 	if handleDBError(c, err, "Cursor Decode Error") {
 		return
 	}
@@ -259,7 +308,7 @@ func claimJobHandler(c *gin.Context) {
 		SetReturnDocument(options.After).
 		SetSort(bson.M{"created_at": 1}) // `1` for ascending and `-1` for descending order.
 
-	err := queueCol.FindOneAndUpdate(context.TODO(), filter, update, opts).Decode(&job)
+	err := queueCol.FindOneAndUpdate(c.Request.Context(), filter, update, opts).Decode(&job)
 
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
@@ -305,7 +354,7 @@ func updateJobHandler(c *gin.Context) {
 	filter := bson.M{"url": updateData.URL}
 	update := bson.M{"$set": bson.M{"status": updateData.Status}}
 
-	result, err := queueCol.UpdateOne(context.TODO(), filter, update)
+	result, err := queueCol.UpdateOne(c.Request.Context(), filter, update)
 	if handleDBError(c, err, "Mongo Update Error") {
 		return
 	}
@@ -415,6 +464,41 @@ func getMongoURI() string {
 // HELPER FUNCTIONS
 // ==========================================
 
+// Get DB criteria from local variables.
+func loadConfig() {
+	file, err := os.Open(".local_credential")
+	if err == nil {
+		defer file.Close()
+		log.Println("📂 Loading credential from file")
+
+		scanner := bufio.NewScanner(file)
+		for scanner.Scan() {
+			line := scanner.Text()
+			// Parse "KEY=VALUE"
+			parts := strings.SplitN(line, "=", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+
+				if key == "MONGO_USER" {
+					MongoUser = value
+				}
+				if key == "MONGO_PASS" {
+					MongoPass = value
+				}
+			}
+		}
+	}
+	// If the environment variable exists, use it. Otherwise keep default.
+	if user := os.Getenv("MONGO_USER"); user != "" {
+		MongoUser = user
+	}
+	if pass := os.Getenv("MONGO_PASS"); pass != "" {
+		MongoPass = pass
+	}
+}
+
+// Search for HTTPS keys file "*.pem".
 func fileExists(filename string) bool {
 	info, err := os.Stat(filename)
 	if os.IsNotExist(err) {
