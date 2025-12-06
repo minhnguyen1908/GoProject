@@ -1,0 +1,10 @@
+{
+  "general": {
+    "previewFeatures": true,
+    "vimMode": true,
+    "enablePromptCompletion": true
+  },
+  "ide": {
+    "enabled": true
+  }
+}

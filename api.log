@@ -1,0 +1,58 @@
+2025/12/02 12:24:41 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/02 12:24:41 api.go:377: 🔍 [Config] Detecting MongoDB port via 'docker compose'...
+2025/12/02 12:24:42 api.go:391: 🎯 [Config] Found MongoDB on dynamic port: 32866
+2025/12/02 12:24:42 api.go:397: Generated connection string: mongodb://root:example@localhost:32866
+2025/12/02 12:24:42 api.go:329: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://root:example@localhost:32866]
+2025/12/02 12:24:42 api.go:368: ✅ [DB] Connected to MongoDB at mongodb://root:example@localhost:32866
+2025/12/02 12:24:42 api.go:82: 🚀 Server is ready! Try to do the thing you want.
+2025/12/02 15:01:59 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/02 15:01:59 api.go:390: 🔍 [Config] Detecting MongoDB port via 'docker compose'...
+2025/12/02 15:02:00 api.go:404: 🎯 [Config] Found MongoDB on dynamic port: 32866
+2025/12/02 15:02:00 api.go:410: Generated connection string: mongodb://root:example@localhost:32866
+2025/12/02 15:02:00 api.go:342: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://root:example@localhost:32866]
+2025/12/02 15:02:00 api.go:381: ✅ [DB] Connected to MongoDB at mongodb://root:example@localhost:32866
+2025/12/02 15:02:00 api.go:87: 🔒 Certificates found! Starting Server in HTTPS mode on: 8443
+2025/12/02 15:04:13 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:04:13 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:05:13 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:05:13 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:05:26 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:05:26 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:05:40 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:05:40 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:05:47 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:05:47 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:05:56 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:05:56 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:06:10 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:06:10 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:06:15 api.go:170: 🔍 [Search] Query: map[]
+2025/12/02 15:06:15 api.go:211: ✅ [Search] Found 7 jobs matching filter 
+2025/12/02 15:09:09 api.go:139: 📥 [Enqueue] Request received: URL=https://vietcetera.com/en/pawsome-hangouts-top-5-dog-friendly-dining-spots-in-hcmc
+2025/12/02 15:09:09 api.go:148: ⚠️ [Enqueue] Duplicate skipped: https://vietcetera.com/en/pawsome-hangouts-top-5-dog-friendly-dining-spots-in-hcmc
+2025/12/02 15:10:47 api.go:139: 📥 [Enqueue] Request received: URL=https://vietcetera.com/en/pawsome-hangouts-top-5-dog-friendly-dining-spots-in-hcmc
+2025/12/02 15:10:47 api.go:148: ⚠️ [Enqueue] Duplicate skipped: https://vietcetera.com/en/pawsome-hangouts-top-5-dog-friendly-dining-spots-in-hcmc
+2025/12/02 15:11:53 api.go:242: 👷‍♀️ [Claim] Worker request. Specific URL: ''
+2025/12/02 15:11:53 api.go:266: ⚠️ [Claim] No jobs available (Filter: map[status:pending url:viet])
+2025/12/02 15:12:27 api.go:242: 👷‍♀️ [Claim] Worker request. Specific URL: ''
+2025/12/02 15:12:27 api.go:279: ✅ [Claim] Assigned job: https://vietcetera.com/en/pawsome-hangouts-top-5-dog-friendly-dining-spots-in-hcmc
+2025/12/02 15:15:40 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/02 15:15:40 api.go:390: 🔍 [Config] Detecting MongoDB port via 'docker compose'...
+2025/12/02 15:15:40 api.go:404: 🎯 [Config] Found MongoDB on dynamic port: 32866
+2025/12/02 15:15:40 api.go:410: Generated connection string: mongodb://root:example@localhost:32866
+2025/12/02 15:15:40 api.go:342: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://root:example@localhost:32866]
+2025/12/02 15:15:40 api.go:381: ✅ [DB] Connected to MongoDB at mongodb://root:example@localhost:32866
+2025/12/02 15:15:40 api.go:87: 🔒 Certificates found! Starting Server in HTTPS mode on: 8443
+2025/12/02 15:15:53 api.go:242: 👷‍♀️ [Claim] Worker request. Specific URL: ''
+2025/12/02 15:15:53 api.go:470: 👷‍♀️ I'm here, before the `DisallowUnknownFields`
+2025/12/02 15:15:53 api.go:279: ✅ [Claim] Assigned job: https://local-insider.com/post/best-pet-friendly-restaurants-in-saigon/62fbc1cee17e8261c0f6599e
+2025/12/02 15:25:34 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/02 15:25:34 api.go:390: 🔍 [Config] Detecting MongoDB port via 'docker compose'...
+2025/12/02 15:25:35 api.go:404: 🎯 [Config] Found MongoDB on dynamic port: 32866
+2025/12/02 15:25:35 api.go:410: Generated connection string: mongodb://root:example@localhost:32866
+2025/12/02 15:25:35 api.go:342: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://root:example@localhost:32866]
+2025/12/02 15:25:35 api.go:381: ✅ [DB] Connected to MongoDB at mongodb://root:example@localhost:32866
+2025/12/02 15:25:35 api.go:87: 🔒 Certificates found! Starting Server in HTTPS mode on: 8443
+2025/12/02 15:25:47 api.go:242: 👷‍♀️ [Claim] Worker request. Specific URL: ''
+2025/12/02 15:25:47 api.go:470: 👷‍♀️ I'm here, before the `DisallowUnknownFields`
+2025/12/02 15:25:47 api.go:474: ⚠️ [Bind] Bad Request: json: unknown field "status"
