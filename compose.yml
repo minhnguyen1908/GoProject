@@ -1,0 +1,81 @@
+services:
+  api:
+    build: .
+    container_name: go-api-dev
+    restart: always
+    ports:
+      - "8080:8080"
+    environment:
+      MONGO_URI: "mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017"
+    volumes:
+      - .:/app
+      - /app/tmp #Prevent tmp syncing
+    depends_on:
+      mongo:
+        condition: service_healthy
+    command: ["air", "-c", ".air.api.toml"]
+  # === Service 2: Seeder
+  seeder:
+    build: . # Uses the SAME Dockerfile!
+    container_name: go-seeder-dev
+    # Worder don't usually need ports exposed unless they have metrics
+    environment:
+      API_QUEUE_URL: "http://api:8080/queue"
+      G_SEARCH: ${G_SEARCH}
+      G_CX: ${G_CX}
+      USE_DYNAMIC_SEARCH: "true"
+    volumes:
+      - .:/app
+      - /app/tmp
+    depends_on:
+      api:
+        condition: service_started
+    command: ["air", "-c", ".air.seeder.toml"]
+
+  mongo:
+    image: mongo:8.2.2
+    restart: always
+    ports:
+      - "27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    volumes:
+      - ./my-data/mongo/db:/data/db
+      - ./my-data/mongo/configdb:/data/configdb
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "mongosh",
+          "-u",
+          "root",
+          "-p",
+          "example",
+          "--authenticationDatabase",
+          "admin",
+          "--eval",
+          "db.adminCommand('ping')",
+        ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  postgres:
+    image: postgres:18.1
+    restart: always
+    ports:
+      - "5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - ./my-data/postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d mydatabase"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s

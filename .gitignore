@@ -1,2 +1,5 @@
 *.pem
 .local_credential
+.env
+my-data/
+tmp/
