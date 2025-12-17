@@ -34,12 +34,35 @@ const (
 	StatusProcessing = "processing"
 	StatusDone       = "done"
 	StatusFailed     = "failed"
+
+	// Add Quota Constant
+	GoogleDailyLimit = 100
 )
 
 type CrawlJob struct {
 	URL       string    `json:"url" bson:"url"`
 	Status    string    `json:"status" bson:"status"`
 	CreatedAt time.Time `json:"created_at" bson:"created_at"`
+}
+
+// Represents a keyword search we want the Seeder to perform.
+// We track estimated results vs actual results here.
+type SearchTask struct {
+	ID             primitive.ObjectID `json:"id" bson:"_id,omitempty"`
+	Query          string             `json:"query" bson:"query"`
+	Status         string             `json:"status" bson:"status"`
+	TotalEstimated string             `json:"total_estimated" bson:"total_estimated"`
+	ActualFound    int                `json:"actual_found" bson:"actual_found"`
+	CreatedAt      time.Time          `json:"created_at" bson:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at" bson:"updated_at"`
+}
+
+// QuotaUsage Model
+type QuotaUsage struct {
+	ID        string    `bson:"_id"`  // e.g. "google search"
+	Date      string    `bson:"date"` // e.g. "2025-12-17"
+	Count     int       `bson:"count"`
+	UpdatedAt time.Time `bson:"updated_at"`
 }
 
 // HATEOAS structure
@@ -58,6 +81,12 @@ type JobResponse struct {
 
 // Global variables
 var queueCol *mongo.Collection
+
+// collection for search tasks
+var searchCol *mongo.Collection
+
+// collection for QuotaUsage
+var quotaCol *mongo.Collection
 var mongoClient *mongo.Client
 
 // ==========================================
@@ -84,6 +113,15 @@ func main() {
 	r.GET("/queue", searchJobsHandler)
 	r.POST("/queue/claim", claimJobHandler)
 	r.PUT("/queue", updateJobHandler)
+
+	// Added Routes for Seeder Tasks
+	r.POST("/search", createSearchHandler)
+	r.POST("/search/claim", claimSearchHandler)
+	r.PUT("/search", updateSearchHandler)
+
+	// Quota Routes
+	r.GET("/quota/google", getQuotaHandler)
+	r.POST("/quota/google/increment", incrementQuotaHandler)
 
 	// SERVER SETUP (HTTPS + GRACEFUL SHUTDOWN)
 
@@ -367,6 +405,183 @@ func updateJobHandler(c *gin.Context) {
 
 	log.Println("✅ [Update] Success.")
 	sendResponse(c, http.StatusOK, gin.H{"message": "Job updated", "new_status": updateData.Status})
+}
+
+// Handler to Create a new Search Task
+func createSearchHandler(c *gin.Context) {
+	var task SearchTask
+	if !bindJSON(c, &task) {
+		return
+	}
+
+	task.ID = primitive.NewObjectID() // Generat ID manually so we can return it
+	task.Status = StatusPending
+	task.CreatedAt = time.Now()
+	task.UpdatedAt = time.Now()
+
+	_, err := searchCol.InsertOne(c.Request.Context(), task)
+	if handleDBError(c, err, "Search Insert Error") {
+		return
+	}
+
+	log.Printf("✅ [Search] New Task Created: %s", task.Query)
+	sendResponse(c, http.StatusCreated, gin.H{
+		"message": "Search task created",
+		"task_id": task.ID,
+	})
+}
+
+// Handler for Seeder to Claim a Search Task.
+func claimSearchHandler(c *gin.Context) {
+	var task SearchTask
+
+	// We allow claiming a specific query if needed, otherwise grab any pending.
+	var req struct {
+		Query string `json:"query"`
+	}
+	if !bindJSON(c, &req) {
+		return
+	}
+
+	filter := bson.M{"status": StatusPending}
+	if req.Query != "" {
+		filter["query"] = req.Query
+	}
+
+	update := bson.M{
+		"$set": bson.M{
+			"status":     StatusPending,
+			"updated_at": time.Now(),
+		},
+	}
+
+	opts := options.FindOneAndUpdate().SetReturnDocument(options.After).SetSort(bson.M{"created_at": 1})
+
+	err := searchCol.FindOneAndUpdate(c.Request.Context(), filter, update, opts).Decode(&task)
+	if err != nil {
+		sendResponse(c, http.StatusNotFound, gin.H{"message": "No peding search tasks"})
+		return
+	}
+
+	log.Printf("✅ [Search] Task Claimed: %s", task.Query)
+	sendResponse(c, http.StatusOK, gin.H{"task": task})
+}
+
+// Handler to Update Search Task
+func updateSearchHandler(c *gin.Context) {
+	var updateData struct {
+		ID             string `json:"id" binding:"required"` // Must have ID to update
+		Status         string `json:"status"`
+		TotalEstimated string `json:"total_estimated"`
+		ActualFound    int    `json:"actual_found"`
+	}
+	if !bindJSON(c, &updateData) {
+		return
+	}
+
+	// Convert string ID to ObjectID
+	objID, err := primitive.ObjectIDFromHex(updateData.ID)
+	if err != nil {
+		sendResponse(c, http.StatusBadRequest, gin.H{"error": "Invalid ID format"})
+		return
+	}
+
+	filter := bson.M{"_id": objID}
+
+	// Dynamic update: Only update fields that were sent
+	updateFields := bson.M{"updated_at": time.Now()}
+	if updateData.Status != "" {
+		updateFields["status"] = updateData.Status
+	}
+	if updateData.TotalEstimated != "" {
+		updateFields["total_estimated"] = updateData.TotalEstimated
+	}
+	if updateData.ActualFound > 0 {
+		updateFields["actual_found"] = updateData.ActualFound
+	}
+
+	result, err := searchCol.UpdateOne(c.Request.Context(), filter, bson.M{"$set": updateFields})
+	if handleDBError(c, err, "Search Update Errro") {
+		return
+	}
+
+	if result.MatchedCount == 0 {
+		sendResponse(c, http.StatusNotFound, gin.H{"error": "Task not found"})
+		return
+	}
+
+	log.Printf("✅ [Search] Task Updated: %s", updateData.ID)
+	sendResponse(c, http.StatusOK, gin.H{"message": "Search task updated"})
+}
+
+// Quota Handler
+
+func getQuotaHandler(c *gin.Context) {
+	today := time.Now().Format("2025-12-17")
+	var usage QuotaUsage
+
+	filter := bson.M{"_id": "google_search", "date": today}
+	err := quotaCol.FindOne(c.Request.Context(), filter).Decode(&usage)
+
+	currentCount := 0
+	if err == nil {
+		currentCount = usage.Count
+	} else if err != mongo.ErrNoDocuments {
+		handleDBError(c, err, "Quota Check Error")
+		return
+	}
+
+	remaining := GoogleDailyLimit - currentCount
+	if remaining < 0 {
+		remaining = 0
+	}
+
+	sendResponse(c, http.StatusOK, gin.H{
+		"service":    "google_search",
+		"date":       today,
+		"used":       currentCount,
+		"limit":      GoogleDailyLimit,
+		"remaining":  remaining,
+		"can_search": remaining > 0,
+	})
+}
+
+func incrementQuotaHandler(c *gin.Context) {
+	today := time.Now().Format("2025-12-17")
+
+	// Reset logic check
+	var usage QuotaUsage
+	filter := bson.M{"_id": "google_search"}
+
+	err := quotaCol.FindOne(c.Request.Context(), filter).Decode(&usage)
+	if err == nil {
+		if usage.Date != today {
+			// New Day detected
+			usage.Count = 0
+			usage.Date = today
+		}
+		if usage.Count >= GoogleDailyLimit {
+			sendResponse(c, http.StatusTooManyRequests, gin.H{"error": "Daily quota exceeded", "limit": GoogleDailyLimit})
+			return
+		}
+	} else if err != mongo.ErrNoDocuments {
+		handleDBError(c, err, "Quota Read Error")
+		return
+	}
+
+	update := bson.M{
+		"$inc": bson.M{"count": 1},
+		"$set": bson.M{"date": today, "updated_at": time.Now()},
+	}
+	opts := options.Update().SetUpsert(true)
+
+	_, err = quotaCol.UpdateOne(c.Request.Context(), filter, update, opts)
+	if handleDBError(c, err, "Quota Increment Error") {
+		return
+	}
+
+	log.Printf("📈 [Quota] Google Search +1, Date: %s", today)
+	sendResponse(c, http.StatusOK, gin.H{"message": "Quota incremented"})
 }
 
 // notFoundHandler - used to help user when they hit a non-existing route.
