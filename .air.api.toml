@@ -1,0 +1,20 @@
+root = "."
+tmp_dir = "tmp/api" # 👈 Separate tmp folder!
+
+[build]
+    cmd = "go build -o ./tmp/api/main ./cmd/api/api.go" # 👈 Poins to API
+    bin = "./tmp/api/main"
+    include_ext = ["go"]
+    exclude_dir = ["tmp"]
+
+[log]
+    time = true
+
+[color]
+    main = "magenta"
+
+# API needs the proxy  to show us the website at localhost:8080
+[proxy]
+    enabled = true
+    proxy_port = 8080
+    app_port = 8080

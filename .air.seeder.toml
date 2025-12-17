@@ -1,0 +1,18 @@
+root = "."
+tmp_dir = "tmp/seeder" # 👈 Separate tmp folder!
+
+[build]
+    cmd = "go build -o ./temp/seeder/main ./cmd/seeder/seeder.go" # 👈 Points to Seeder 
+    bin = "./tmp/seeder/main"
+    include_ext = ["go"]
+    exclude_dir = ["tmp"]
+
+[log]
+    time = true
+
+[color]
+    main = "cyam" # Different color for logs!
+
+# Seeder is a background script, it doesn't have a web port to proxy
+[proxy]
+    enabled = false
