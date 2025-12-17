@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt" // Used for DSN string formatting if needed
 	"log"
 	"net/http"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"test-api/internal/logger"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -24,8 +26,7 @@ import (
 )
 
 var (
-	MongoUser = "something"
-	MongoPass = "somethingElse"
+	MongoURI = "mongodb://localhost:27017"
 )
 
 const (
@@ -144,7 +145,7 @@ func main() {
 		// Run the server in a separate Goroutine so it doesn't block
 		go func() {
 			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("❌ Server Listen Error: %s\n", err)
+				log.Fatalf("❌ HTTPS Server Error: %s\n", err)
 			}
 		}()
 	} else {
@@ -152,7 +153,7 @@ func main() {
 		log.Println("🔓 No certs found. Starting in HTTP mode on: 8080")
 		go func() {
 			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("❌ Server Listen Error: %s\n", err)
+				log.Fatalf("❌ HTTP Server Error: %s\n", err)
 			}
 		}()
 	}
@@ -268,7 +269,8 @@ func searchJobsHandler(c *gin.Context) {
 		}
 
 		if !allowedKeys[key] {
-			sendResponse(c, http.StatusBadRequest, gin.H{"error": "Invalid filter: " + key})
+			errorMsg := "Invalid filter: " + key
+			sendResponse(c, http.StatusBadRequest, gin.H{"error": errorMsg})
 			return
 		}
 
@@ -297,18 +299,18 @@ func searchJobsHandler(c *gin.Context) {
 
 	log.Printf("✅ [Search] Found %d jobs matching filter ", len(jobs))
 
-	var JobResources []JobResponse
+	var jobResources []JobResponse
 	for _, job := range jobs {
-		JobResources = append(JobResources, NewJobResponse(job))
+		jobResources = append(jobResources, NewJobResponse(job))
 	}
 
-	if JobResources == nil {
-		JobResources = []JobResponse{}
+	if jobResources == nil {
+		jobResources = []JobResponse{}
 	}
 
 	sendResponse(c, http.StatusOK, gin.H{
 		"count": len(jobs),
-		"jobs":  JobResources,
+		"jobs":  jobResources,
 		"_links": []Link{
 			{Rel: "self", Method: "GET", HRef: "/queue"},
 			{Rel: "claim", Method: "POST", HRef: "/queue/claim"},
@@ -383,7 +385,7 @@ func updateJobHandler(c *gin.Context) {
 	allowUpdates := map[string]bool{StatusDone: true, StatusFailed: true}
 	if !allowUpdates[updateData.Status] {
 		sendResponse(c, http.StatusBadRequest, gin.H{
-			"error":   "Invalidd status transition",
+			"error":   "Invalid status transition",
 			"allowed": []string{StatusDone, StatusFailed},
 		})
 		return
@@ -450,7 +452,7 @@ func claimSearchHandler(c *gin.Context) {
 
 	update := bson.M{
 		"$set": bson.M{
-			"status":     StatusPending,
+			"status":     StatusProcessing,
 			"updated_at": time.Now(),
 		},
 	}
@@ -459,8 +461,13 @@ func claimSearchHandler(c *gin.Context) {
 
 	err := searchCol.FindOneAndUpdate(c.Request.Context(), filter, update, opts).Decode(&task)
 	if err != nil {
-		sendResponse(c, http.StatusNotFound, gin.H{"message": "No peding search tasks"})
-		return
+		if err == mongo.ErrNoDocuments {
+			sendResponse(c, http.StatusNotFound, gin.H{"message": "No pending search tasks"})
+			return
+		}
+		if handleDBError(c, err, "Search Claim Error") {
+			return
+		}
 	}
 
 	log.Printf("✅ [Search] Task Claimed: %s", task.Query)
@@ -501,7 +508,7 @@ func updateSearchHandler(c *gin.Context) {
 	}
 
 	result, err := searchCol.UpdateOne(c.Request.Context(), filter, bson.M{"$set": updateFields})
-	if handleDBError(c, err, "Search Update Errro") {
+	if handleDBError(c, err, "Search Update Error") {
 		return
 	}
 
@@ -546,6 +553,7 @@ func getQuotaHandler(c *gin.Context) {
 	})
 }
 
+// Handler for Incrementing Quota
 func incrementQuotaHandler(c *gin.Context) {
 	today := time.Now().Format("2025-12-17")
 
@@ -602,12 +610,11 @@ var startTime time.Time
 func initMongo() {
 	startTime = time.Now()
 
-	uri := getMongoURI()
-	log.Printf("⏳ [DB] Attempting to connect to MongoDB at: [%s]", uri)
+	log.Printf("⏳ [DB] Attempting to connect to MongoDB at: [%s]", MongoURI)
 
 	var err error
 
-	mongoClient, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(uri))
+	mongoClient, err = mongo.Connect(context.TODO(), options.Client().ApplyURI(MongoURI))
 	if err != nil {
 		log.Fatal("❌ [DB] Failed to create Mongo client: ", err)
 	}
@@ -622,6 +629,8 @@ func initMongo() {
 
 	db := mongoClient.Database("data_pool")
 	queueCol = db.Collection("crawl_queue")
+	searchCol = db.Collection("search_tasks")
+	quotaCol = db.Collection("system_stats")
 
 	// URL index
 	urlIndex := mongo.IndexModel{
@@ -642,37 +651,13 @@ func initMongo() {
 		log.Println("⚠️ [DB] Notice: Status index might already exist:", err)
 	}
 
-	log.Println("✅ [DB] Connected to MongoDB at", uri)
+	log.Println("✅ [DB] Connected to MongoDB successfully!")
 }
 
 // getMongoURI constructs the MongoDB connection string.
 func getMongoURI() string {
-	if uri := os.Getenv("MONGO_URI"); uri != "" {
-		return uri
-	}
-
-	log.Println("🔍 [Config] Detecting MongoDB port via 'docker compose'...")
-
-	cmd := exec.Command("docker", "compose", "port", "mongo", "27017")
-	output, err := cmd.Output()
-
-	port := "27017" // Default fallback
-
-	if err != nil {
-		log.Printf("⚠️ [Config] Failed to run docker command: %v. Defaulting to standard %s.", err, port)
-	} else {
-		rawOutput := strings.TrimSpace(string(output))
-		parts := strings.Split(rawOutput, ":")
-		if len(parts) >= 2 {
-			port = parts[len(parts)-1]
-			log.Printf("🎯 [Config] Found MongoDB on dynamic port: %s", port)
-		}
-	}
-
-	connectionString := "mongodb://" + MongoUser + ":" + MongoPass + "@localhost:" + port
-
-	log.Printf("Generated connection string: %s", connectionString)
-	return connectionString
+	// Simple getter now, as Docker Compose/Env handles the complexity
+	return MongoURI
 }
 
 // ==========================================
@@ -681,35 +666,16 @@ func getMongoURI() string {
 
 // Get DB criteria from local variables.
 func loadConfig() {
-	file, err := os.Open(".local_credential")
-	if err == nil {
-		defer file.Close()
-		log.Println("📂 Loading credential from file")
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Text()
-			// Parse "KEY=VALUE"
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-
-				if key == "MONGO_USER" {
-					MongoUser = value
-				}
-				if key == "MONGO_PASS" {
-					MongoPass = value
-				}
-			}
-		}
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ No .env file found (using system env vars)")
+	} else {
+		log.Println("📂 Loaded config from .env")
 	}
-	// If the environment variable exists, use it. Otherwise keep default.
-	if user := os.Getenv("MONGO_USER"); user != "" {
-		MongoUser = user
-	}
-	if pass := os.Getenv("MONGO_PASS"); pass != "" {
-		MongoPass = pass
+
+	// Read variables into globals
+	if uri := os.Getenv("MONGO_URI"); uri != "" {
+		MongoURI = uri
 	}
 }
 

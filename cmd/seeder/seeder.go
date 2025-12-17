@@ -9,10 +9,14 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"google.golang.org/api/customsearch/v1"
 	"google.golang.org/api/option"
 
@@ -21,21 +25,19 @@ import (
 
 // The API we will talk to
 // Default to localhost, but can be overridden by env vars
-var APIQueueURL = "http://localhost:8080/queue"
+var configMutex sync.RWMutex
 
 // Config variables
 var (
+	APIQueueURL      = "http://localhost:8080"
 	GoogleAPIKey = ""
 	GoogleCXID   = ""
 	// Feature flag for switching modes
 	UseDynamicSearch = true
 	// The hardcoded fallback query
 	ManualQuery = "Top 10 pet friendly restaurants in Ho Chi Minh City"
+	MaxResultsToProcess = 1 
 )
-
-// Limit for testing (Safety Brake)
-// Set to 10 for full run, or 1 for testing.
-const MaxResultsToProcess = 1
 
 // The Payload structure (Must match what the API expects)
 type EnqueueRequest struct {
@@ -62,21 +64,40 @@ type SearchUpdate struct {
 func main() {
 	// 1. Setup Logger
 	logger.Setup("seeder.log")
+	
+	// <--- CHANGE: Load Config from .env
+	loadConfig()
 
-	// 2. Load Credentials
-	loadCredentials()
-
-	if GoogleAPIKey == "" || GoogleCXID == "" {
-		log.Fatal("❌ Error: Missing Google API key and CX")
+	if getGoogleAPIKey() == "" || getGoogleCXID() == "" {
+		log.Fatal("❌ Error: Missing Google key or cx")
 	}
 
-	log.Printf("🔗 Using API Queue URL: %s", APIQueueURL)
+	log.Printf("🔗 Using API Base URL: %s", getAPIQueueURL())
 
-	// 3. Define the Search Query
+	reloadSig := make(chan os.Signal, 1)
+	signal.Notify(reloadSig, syscall.SIGUSR1)
+
+	go func() {
+		for {
+			<-reloadSig
+			log.Println("🔄 [Config] Signal received! Reloading configuration...")
+			loadConfig()
+			log.Printf("✨ [Config] Reload complete. Limit: %d", getMaxResults())
+		}
+	}()
+
+	for {
+		runSeederCycle()
+		log.Println("⏳ Waiting 10s before next cycle... (Send SIGUSR1 to reload config)")
+		time.Sleep(10 * time.Second)
+	}
+}
+
+func runSeederCycle() {
 	var currentQuery string
 	var taskID string
 
-	if UseDynamicSearch {
+	if getUseDynamicSearch() {
 		log.Println("🔄 Mode: Dynamic (Asking API for work)")
 
 		// Claim a Search Task from the API
@@ -92,7 +113,7 @@ func main() {
 		log.Printf("🚀 [Seeder] Claimed Task: '%s' (ID: %s)", currentQuery, taskID)
 	} else {
 		log.Println("🔧 Mode: Manual (Using hardcoded query)")
-		currentQuery = ManualQuery
+		currentQuery = getManualQuery()
 		taskID = "manual-run"
 		log.Printf("🚀 [Seeder] Starting Manual Run: '%s'", currentQuery)
 	}
@@ -109,6 +130,8 @@ func main() {
 
 	// 5. Filter & Send to Queue API
 	count := 0
+	limit := getMaxResults()
+	
 	for _, link := range links {
 		// Safety Brake logic
 		if count >= MaxResultsToProcess {
@@ -130,8 +153,8 @@ func main() {
 		}
 	}
 
-	// Update the Task status (Only if Dynamic)
-	if UseDynamicSearch {
+	
+	if getUseDynamicSearch() {
 		if err := updateSearchTask(taskID, "done", totalResults, count); err != nil {
 			log.Printf("❌ Failed to update task status: %v", err)
 		} else {
@@ -140,6 +163,38 @@ func main() {
 	} else {
 		log.Println("🏁 Manual run completed.")
 	}
+}
+
+// ... (Getters) ...
+func getGoogleAPIKey() string {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return GoogleAPIKey
+}
+func getGoogleCXID() string {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return GoogleCXID
+}
+func getAPIQueueURL() string {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return APIQueueURL
+}
+func getUseDynamicSearch() bool {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return UseDynamicSearch
+}
+func getManualQuery() string {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return ManualQuery
+}
+func getMaxResults() int {
+	configMutex.RLock()
+	defer configMutex.RUnlock()
+	return MaxResultsToProcess
 }
 
 // googleSearch uses the Official Google Go client to find links
@@ -151,7 +206,7 @@ func googleSearch(query string, debug bool) ([]string, string, error) {
 	}
 
 	// Perform the search
-	resp, err := svc.Cse.List().Cx(GoogleCXID).Q(query).Do()
+	resp, err := svc.Cse.List().Cx(getGoogleCXID()).Q(query).Do()
 	if err != nil {
 		return nil, "", fmt.Errorf("search call failed: %w", err)
 	}
@@ -174,9 +229,9 @@ func googleSearch(query string, debug bool) ([]string, string, error) {
 func claimSearchTask(query string) (*SearchTask, error) {
 	reqData := map[string]string{"query": query}
 	jsonData, _ := json.Marshal(reqData)
-
-	resp, err := http.Post(APIQueueURL+"/search/claim", "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
+	url := getAPIQueueURL() + "/search/claim"
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil { return nil, err }
 		return nil, err
 	}
 	defer resp.Body.Close()
@@ -205,12 +260,12 @@ func updateSearchTask(id, status, estimated string, found int) error {
 		ActualFound:    found,
 	}
 	jsonData, _ := json.Marshal(reqData)
-
-	req, err := http.NewRequest(http.MethodPut, APIQueueURL+"/search", bytes.NewBuffer(jsonData))
-	if err != nil {
+	url := getAPIQueueURL() + "/search"
+	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonData))
+	if err != nil { return err }
 		return err
 	}
-	req.Header.Set("Context-Type", "application/json")
+	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -225,65 +280,39 @@ func updateSearchTask(id, status, estimated string, found int) error {
 	return nil
 }
 
-// Helper to read secrets.nu file
-func loadCredentials() {
-	file, err := os.Open("secrets.nu")
-	if err == nil {
-		defer file.Close()
-		log.Println("📂 Loading credentials from secrets.nu")
-
-		scanner := bufio.NewScanner(file)
-		for scanner.Scan() {
-			line := scanner.Text()
-
-			// 1. Split by "="
-
-			parts := strings.SplitN(line, "=", 2)
-			if len(parts) == 2 {
-				keyPart := strings.TrimSpace(parts[0])
-				valuePart := strings.TrimSpace(parts[1])
-
-				// 2. Clean up the Value (Remove quotes " or ')
-				valuePart = strings.Trim(valuePart, `"'`)
-
-				if strings.Contains(keyPart, "G_SEARCH") {
-					GoogleAPIKey = valuePart
-				}
-				if strings.Contains(keyPart, "G_CX") {
-					GoogleCXID = valuePart
-				}
-				if strings.Contains(keyPart, "API_QUEUE_URL") {
-					APIQueueURL = strings.TrimSuffix(valuePart, "/")
-				}
-				// Parse the boolean flag from file
-				if strings.Contains(keyPart, "USE_DYNAMIC_SEARCH") {
-					if val, err := strconv.ParseBool(valuePart); err == nil {
-						UseDynamicSearch = val
-					}
-				}
-				// Allow overriding manual query from file
-				if strings.Contains(keyPart, "MANUAL_QUERY") {
-					ManualQuery = valuePart
-				}
-			}
-		}
+// <--- CHANGE: Config Loader using godotenv
+func loadConfig() {
+	// Load .env
+	if err := godotenv.Load(); err != nil {
+		log.Println("⚠️ No .env file found (using system env vars)")
+	} else {
+		log.Println("📂 Loaded config from .env")
 	}
 
-	// Environment variables override file
-	if key := os.Getenv("G_SEARCH"); key != "" {
-		GoogleAPIKey = key
+	newAPIKey := os.Getenv("G_SEARCH")
+	newCXID := os.Getenv("G_CX")
+	newAPIURL := os.Getenv("API_QUEUE_URL")
 	}
-	if cx := os.Getenv("G_CX"); cx != "" {
-		GoogleCXID = cx
+	newManualQuery := os.Getenv("MANUAL_QUERY")
+	
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	if newAPIKey != "" { GoogleAPIKey = newAPIKey }
 	}
-	if url := os.Getenv("API_QUEUE_URL"); url != "" {
-		APIQueueURL = strings.TrimSuffix(url, "/")
-	}
+	if newCXID != "" { GoogleCXID = newCXID }
+	if newAPIURL != "" { APIQueueURL = strings.TrimSuffix(newAPIURL, "/") }
+	if newManualQuery != "" { ManualQuery = newManualQuery }
 
 	// Environment override for flag
 	if val := os.Getenv("USE_DYNAMIC_SEARCH"); val != "" {
 		if boolVal, err := strconv.ParseBool(val); err == nil {
 			UseDynamicSearch = boolVal
+		}
+	}
+	if val := os.Getenv("MAX_RESULTS"); val != "" {
+		if intVal, err := strconv.Atoi(val); err == nil {
+			MaxResultsToProcess = intVal
 		}
 	}
 }
@@ -310,9 +339,9 @@ func isSocialMedia(url string) bool {
 func sendToQueue(url string) error {
 	payload := EnqueueRequest{URL: url}
 	jsonData, _ := json.Marshal(payload)
-
-	resp, err := http.Post(APIQueueURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil {
+	targetURL := getAPIQueueURL() + "/queue"
+	resp, err := http.Post(targetURL, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil { return err }
 		log.Printf("❌ API Request Failed: %v", err)
 		return err
 	}
