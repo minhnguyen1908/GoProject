@@ -6,6 +6,7 @@ services:
     ports:
       - "8080:8080"
     environment:
+      SEEDER_URL: "http://seeder:8081"
       MONGO_URI: "mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASSWORD}@mongo:27017"
     volumes:
       - .:/app
@@ -18,9 +19,10 @@ services:
   seeder:
     build: . # Uses the SAME Dockerfile!
     container_name: go-seeder-dev
-    # Worder don't usually need ports exposed unless they have metrics
+    ports:
+      - "8081:8081"
     environment:
-      API_QUEUE_URL: "http://api:8080/queue"
+      API_QUEUE_URL: "http://api:8080"
       G_SEARCH: ${G_SEARCH}
       G_CX: ${G_CX}
       USE_DYNAMIC_SEARCH: "true"

@@ -1,16 +1,13 @@
 package main
 
 import (
-	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
-	"fmt" // Used for DSN string formatting if needed
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -26,7 +23,8 @@ import (
 )
 
 var (
-	MongoURI = "mongodb://localhost:27017"
+	MongoURI  = "mongodb://localhost:27017"
+	SeederURL = "http://localhost:8081"
 )
 
 const (
@@ -426,6 +424,10 @@ func createSearchHandler(c *gin.Context) {
 		return
 	}
 
+	// [NEW LOGIC]
+	// We call the dispatcher immediately
+	go dispatchJob()
+
 	log.Printf("✅ [Search] New Task Created: %s", task.Query)
 	sendResponse(c, http.StatusCreated, gin.H{
 		"message": "Search task created",
@@ -517,6 +519,27 @@ func updateSearchHandler(c *gin.Context) {
 		return
 	}
 
+	// [NEW LOGIC]
+	// We handle Quota counting and Triggering the next job here.
+	if updateData.Status == StatusDone {
+		log.Println("📈 [Quota] Search Done. Incrementing quota.")
+		today := time.Now().Format("2025-12-17")
+
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		_, err := quotaCol.UpdateOne(ctx,
+			bson.M{"_id": "google_search"},
+			bson.M{"$inc": bson.M{"count": 1}, "$set": bson.M{"date": today}},
+			options.Update().SetUpsert(true))
+
+		if err != nil {
+			log.Printf("⚠️ [Quota] Failed to increment: %v", err)
+		}
+		go dispatchJob()
+	}
+	// ------------
+
 	log.Printf("✅ [Search] Task Updated: %s", updateData.ID)
 	sendResponse(c, http.StatusOK, gin.H{"message": "Search task updated"})
 }
@@ -590,6 +613,55 @@ func incrementQuotaHandler(c *gin.Context) {
 
 	log.Printf("📈 [Quota] Google Search +1, Date: %s", today)
 	sendResponse(c, http.StatusOK, gin.H{"message": "Quota incremented"})
+}
+
+// [NEW LOGIC] DISPATCHER LOGIC
+func dispatchJob() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// 1. Quota check
+	var usage QuotaUsage
+	err := quotaCol.FindOne(ctx, bson.M{"_id": "google_search"}).Decode(&usage)
+	if err == nil && usage.Count >= GoogleDailyLimit {
+		log.Printf("🛑 [Dispatch] Quota limit reach (%d).", usage.Count)
+		return
+	}
+
+	// 2. Busy Check
+	count, _ := searchCol.CountDocuments(ctx, bson.M{"status": StatusProcessing})
+	if count > 0 {
+		log.Println("⏸️ [Dispatch] Seeder is busy.")
+		return
+	}
+
+	// 3. Find Next Job
+	var task SearchTask
+	opts := options.FindOneAndUpdate().SetSort(bson.M{"created_at": 1})
+	filter := bson.M{"status": StatusPending}
+	update := bson.M{"$set": bson.M{"status": StatusProcessing, "updated_at": time.Now()}}
+
+	err = searchCol.FindOneAndUpdate(ctx, filter, update, opts).Decode(&task)
+	if err != nil {
+		return
+	} // no pending jobs
+
+	log.Printf("🚀 [Dispatch] Pushing task to Seeder: %s", task.Query)
+
+	// 4. Push to Seeder
+	payload := map[string]string{
+		"id":    task.ID.Hex(),
+		"query": task.Query,
+	}
+	jsonData, _ := json.Marshal(payload)
+
+	target := SeederURL + "/process"
+	resp, err := http.Post(target, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Printf("❌ [Dispatch] Failed to contract Seeder: %v", err)
+		return
+	}
+	defer resp.Body.Close()
 }
 
 // notFoundHandler - used to help user when they hit a non-existing route.
@@ -676,6 +748,9 @@ func loadConfig() {
 	// Read variables into globals
 	if uri := os.Getenv("MONGO_URI"); uri != "" {
 		MongoURI = uri
+	}
+	if url := os.Getenv("SEEDER_URL"); url != "" {
+		SeederURL = url
 	}
 }
 

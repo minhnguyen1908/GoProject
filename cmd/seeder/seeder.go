@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -9,11 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"os/signal"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -29,15 +26,21 @@ var configMutex sync.RWMutex
 
 // Config variables
 var (
-	APIQueueURL      = "http://localhost:8080"
+	APIQueueURL  = "http://localhost:8080"
 	GoogleAPIKey = ""
 	GoogleCXID   = ""
 	// Feature flag for switching modes
 	UseDynamicSearch = true
 	// The hardcoded fallback query
-	ManualQuery = "Top 10 pet friendly restaurants in Ho Chi Minh City"
-	MaxResultsToProcess = 1 
+	ManualQuery         = "Top 10 pet friendly restaurants in Ho Chi Minh City"
+	MaxResultsToProcess = 1
 )
+
+// [NEW MODELS] ----
+type SeederRequest struct {
+	ID    string `json:"id"`
+	Query string `json:"query"`
+}
 
 // The Payload structure (Must match what the API expects)
 type EnqueueRequest struct {
@@ -64,7 +67,7 @@ type SearchUpdate struct {
 func main() {
 	// 1. Setup Logger
 	logger.Setup("seeder.log")
-	
+
 	// <--- CHANGE: Load Config from .env
 	loadConfig()
 
@@ -74,25 +77,100 @@ func main() {
 
 	log.Printf("🔗 Using API Base URL: %s", getAPIQueueURL())
 
-	reloadSig := make(chan os.Signal, 1)
-	signal.Notify(reloadSig, syscall.SIGUSR1)
+	// [NEW LOGIC] ========
+	// We start a server to LISTEN for commands
+	http.HandleFunc("/process", processHandler)
 
-	go func() {
-		for {
-			<-reloadSig
-			log.Println("🔄 [Config] Signal received! Reloading configuration...")
-			loadConfig()
-			log.Printf("✨ [Config] Reload complete. Limit: %d", getMaxResults())
-		}
-	}()
-
-	for {
-		runSeederCycle()
-		log.Println("⏳ Waiting 10s before next cycle... (Send SIGUSR1 to reload config)")
-		time.Sleep(10 * time.Second)
+	port := ":8081"
+	log.Printf("👷 [Seeder] Worker ready. Listening on %s", port)
+	if err := http.ListenAndServe(port, nil); err != nil {
+		log.Fatal(err)
 	}
+
+	// ====================
+	// [OLD CODE]
+	// This was the old "Infinite Loop" that pulled data.
+	/*
+		reloadSig := make(chan os.Signal, 1)
+		signal.Notify(reloadSig, syscall.SIGUSR1)
+
+		go func() {
+			for {
+				<-reloadSig
+				log.Println("🔄 [Config] Signal received! Reloading configuration...")
+				loadConfig()
+				log.Printf("✨ [Config] Reload complete. Limit: %d", getMaxResults())
+			}
+		}()
+
+		for {
+			runSeederCycle()
+			log.Println("⏳ Waiting 10s before next cycle... (Send SIGUSR1 to reload config)")
+			time.Sleep(10 * time.Second)
+		}
+	*/
+	// =====================
 }
 
+// [NEW HANDLER] triggerd by API.
+func processHandler(w http.ResponseWriter, r *http.Request) {
+	var req SeederRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid JSON", 400)
+		return
+	}
+
+	log.Printf("📥 [Seeder] Received Job: %s", req.Query)
+
+	// Reply OK immediately
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("Job Accepted"))
+
+	go func() {
+		performSearchAndReport(req)
+	}()
+}
+
+func performSearchAndReport(req SeederRequest) {
+	log.Printf("🔎 [Seeder] Googling: %s...", req.Query)
+
+	// 1. Run Search
+	// We pass 'true' for debug to see the raw response log!
+	links, totalResults, err := googleSearch(req.Query, true)
+
+	status := "done"
+	if err != nil {
+		log.Printf("❌ [Seeder] Search Failed: %v", err)
+		status = "failed"
+	} else {
+		log.Printf("✅ [Seeder] Found %d links. Processing...", len(links))
+
+		// [RESTORED LOGIC]: Sending links to queue is kept active!
+		count := 0
+		for _, link := range links {
+			if count >= MaxResultsToProcess {
+				break
+			}
+			if isSocialMedia(link) {
+				continue
+			}
+
+			if err := sendToQueue(link); err != nil {
+				log.Printf("⚠️ [Queue] Failed to send %s", link)
+			} else {
+				log.Printf("📤 [Queue] Sent: %s", link)
+				count++
+				time.Sleep(500 * time.Millisecond)
+			}
+		}
+	}
+
+	updateAPI(req.ID, status, totalResults, len(links))
+}
+
+// [OLD CODE] ===============
+// This function is no longer called
+/*
 func runSeederCycle() {
 	var currentQuery string
 	var taskID string
@@ -131,7 +209,7 @@ func runSeederCycle() {
 	// 5. Filter & Send to Queue API
 	count := 0
 	limit := getMaxResults()
-	
+
 	for _, link := range links {
 		// Safety Brake logic
 		if count >= MaxResultsToProcess {
@@ -153,7 +231,7 @@ func runSeederCycle() {
 		}
 	}
 
-	
+
 	if getUseDynamicSearch() {
 		if err := updateSearchTask(taskID, "done", totalResults, count); err != nil {
 			log.Printf("❌ Failed to update task status: %v", err)
@@ -164,6 +242,33 @@ func runSeederCycle() {
 		log.Println("🏁 Manual run completed.")
 	}
 }
+
+func claimSearchTask(query string) (*SearchTask, error) {
+	reqData := map[string]string{"query": query}
+	jsonData, _ := json.Marshal(reqData)
+	url := getAPIQueueURL() + "/search/claim"
+	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
+	if err != nil { return nil, err }
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("api status %d", resp.StatusCode)
+	}
+
+	var apiResp SearchTaskResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, err
+	}
+
+	if apiResp.Task == nil {
+		return nil, fmt.Errorf("empty task received")
+	}
+
+	return apiResp.Task, nil
+}
+*/
 
 // ... (Getters) ...
 func getGoogleAPIKey() string {
@@ -226,33 +331,7 @@ func googleSearch(query string, debug bool) ([]string, string, error) {
 	return results, resp.SearchInformation.TotalResults, nil
 }
 
-func claimSearchTask(query string) (*SearchTask, error) {
-	reqData := map[string]string{"query": query}
-	jsonData, _ := json.Marshal(reqData)
-	url := getAPIQueueURL() + "/search/claim"
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil { return nil, err }
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api status %d", resp.StatusCode)
-	}
-
-	var apiResp SearchTaskResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, err
-	}
-
-	if apiResp.Task == nil {
-		return nil, fmt.Errorf("empty task received")
-	}
-
-	return apiResp.Task, nil
-}
-
-func updateSearchTask(id, status, estimated string, found int) error {
+func updateAPI(id, status, estimated string, found int) error {
 	reqData := SearchUpdate{
 		ID:             id,
 		Status:         status,
@@ -262,7 +341,7 @@ func updateSearchTask(id, status, estimated string, found int) error {
 	jsonData, _ := json.Marshal(reqData)
 	url := getAPIQueueURL() + "/search"
 	req, err := http.NewRequest(http.MethodPut, url, bytes.NewBuffer(jsonData))
-	if err != nil { return err }
+	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -292,17 +371,25 @@ func loadConfig() {
 	newAPIKey := os.Getenv("G_SEARCH")
 	newCXID := os.Getenv("G_CX")
 	newAPIURL := os.Getenv("API_QUEUE_URL")
-	}
+
 	newManualQuery := os.Getenv("MANUAL_QUERY")
-	
+
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
-	if newAPIKey != "" { GoogleAPIKey = newAPIKey }
+	if newAPIKey != "" {
+		GoogleAPIKey = newAPIKey
 	}
-	if newCXID != "" { GoogleCXID = newCXID }
-	if newAPIURL != "" { APIQueueURL = strings.TrimSuffix(newAPIURL, "/") }
-	if newManualQuery != "" { ManualQuery = newManualQuery }
+
+	if newCXID != "" {
+		GoogleCXID = newCXID
+	}
+	if newAPIURL != "" {
+		APIQueueURL = strings.TrimSuffix(newAPIURL, "/")
+	}
+	if newManualQuery != "" {
+		ManualQuery = newManualQuery
+	}
 
 	// Environment override for flag
 	if val := os.Getenv("USE_DYNAMIC_SEARCH"); val != "" {
@@ -341,7 +428,7 @@ func sendToQueue(url string) error {
 	jsonData, _ := json.Marshal(payload)
 	targetURL := getAPIQueueURL() + "/queue"
 	resp, err := http.Post(targetURL, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil { return err }
+	if err != nil {
 		log.Printf("❌ API Request Failed: %v", err)
 		return err
 	}
