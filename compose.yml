@@ -52,8 +52,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
     volumes:
-      - ./my-data/mongo/db:/data/db
-      - ./my-data/mongo/configdb:/data/configdb
+      - mongo_data:/data/db
     healthcheck:
       test:
         [
@@ -82,10 +81,14 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
-      - ./my-data/postgres:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U user -d mydatabase"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+
+volumes:
+  mongo_data:
+  postgres_data:
