@@ -42,3 +42,17 @@ A Golang-based automated pipeline that accepts natural language queries, manages
 
 * **Rate Limiting:** Due to Google Search API free-tier limits, the system will process requests in a serial queue.
 * **Transparency:** The system will "Update Status" in the DB at every stage (Pending -> Searching -> Truncating -> Extracting -> Finished).
+
+---
+
+### **6. Cost Management & API Governance**
+
+#### **The "100-Limit" Strategy**
+To maintain a zero-cost operational model, the system leverages the Google Search API Free Tier. 
+* **Constraint:** 100 queries per 24-hour period.
+* **Logic:** The API service implements a `QuotaUsage` check in MongoDB before dispatching any job to the Seeder. If the limit is reached, jobs remain in `pending` status until the quota resets.
+
+#### **User Stories**
+* **Financial Safety:** As a Product Owner, I want the system to automatically halt searches when the 100-query limit is reached, so that I do not incur unexpected API charges.
+* **Transparency:** As a User, I want to be notified if my search is delayed due to daily quota limits, so I understand why my request hasn't been processed yet.
+* **Efficiency:** As a Developer, I want to log every successful search against the daily quota, so I can audit usage patterns and plan for future scaling (e.g., adding multiple API keys).
