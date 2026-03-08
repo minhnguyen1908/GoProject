@@ -15,6 +15,6 @@ tmp_dir = "tmp/api" # 👈 Separate tmp folder!
 
 # API needs the proxy  to show us the website at localhost:8080
 [proxy]
-    enabled = true
+    enabled = false
     proxy_port = 8080
     app_port = 8080

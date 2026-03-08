@@ -1,5 +1,6 @@
-*.pem
 .local_credential
 .env
 my-data/
 tmp/
+certs/
+.DS_Store

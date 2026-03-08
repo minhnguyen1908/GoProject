@@ -56,3 +56,22 @@
 2025/12/02 15:25:47 api.go:242: 👷‍♀️ [Claim] Worker request. Specific URL: ''
 2025/12/02 15:25:47 api.go:470: 👷‍♀️ I'm here, before the `DisallowUnknownFields`
 2025/12/02 15:25:47 api.go:474: ⚠️ [Bind] Bad Request: json: unknown field "status"
+2025/12/22 09:01:22 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/22 09:01:22 api.go:727: 📂 Loaded config from .env
+2025/12/22 09:01:22 api.go:667: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://localhost:27017]
+2025/12/22 09:01:27 api.go:680: ❌ [DB] Connection Failed!
+2025/12/22 09:01:27 api.go:681: server selection error: context deadline exceeded, current topology: { Type: Unknown, Servers: [{ Addr: localhost:27017, Type: Unknown, Last error: dial tcp [::1]:27017: connect: connection refused }, ] }
+2025/12/22 09:01:57 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/22 09:01:57 api.go:727: 📂 Loaded config from .env
+2025/12/22 09:01:57 api.go:667: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://localhost:27017]
+2025/12/22 09:02:02 api.go:680: ❌ [DB] Connection Failed!
+2025/12/22 09:02:02 api.go:681: server selection error: context deadline exceeded, current topology: { Type: Unknown, Servers: [{ Addr: localhost:27017, Type: Unknown, Last error: dial tcp 127.0.0.1:27017: connect: connection refused }, ] }
+2025/12/22 09:16:41 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/22 09:16:41 api.go:727: 📂 Loaded config from .env
+2025/12/22 09:16:41 api.go:667: ⏳ [DB] Attempting to connect to MongoDB at: [mongodb://localhost:27017]
+2025/12/22 09:16:46 api.go:680: ❌ [DB] Connection Failed!
+2025/12/22 09:16:46 api.go:681: server selection error: context deadline exceeded, current topology: { Type: Unknown, Servers: [{ Addr: localhost:27017, Type: Unknown, Last error: dial tcp 127.0.0.1:27017: connect: connection refused }, ] }
+2025/12/22 09:17:01 logger.go:35: ✅ Log System Initialized: Writing to console and  api.log
+2025/12/22 09:17:01 api.go:727: 📂 Loaded config from .env
+2025/12/22 09:17:01 api.go:135: 🔓 Starting in HTTP mode on: 8080
+2025/12/22 09:17:12 api.go:149: 🛑 Shutting down server...

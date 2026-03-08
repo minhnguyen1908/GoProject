@@ -122,12 +122,7 @@ func main() {
 	r.GET("/quota/google", getQuotaHandler)
 	r.POST("/quota/google/increment", incrementQuotaHandler)
 
-	// SERVER SETUP (HTTPS + GRACEFUL SHUTDOWN)
-
-	// Check for HTTPS Certificates.
-	certFile := "cert.pem"
-	keyFile := "key.pem"
-	useTLS := fileExists(certFile) && fileExists(keyFile)
+	// SERVER SETUP (GRACEFUL SHUTDOWN)
 
 	// Graceful Shutdown Setup
 	//Create the HTTP server manually so we can control it.
@@ -136,25 +131,12 @@ func main() {
 		Handler: r,
 	}
 
-	if useTLS {
-		srv.Addr = ":8443" // Standard HTTPS alt port
-		log.Println("🔒 Certificates found! Starting in HTTPS mode on: 8443")
-
-		// Run the server in a separate Goroutine so it doesn't block
-		go func() {
-			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("❌ HTTPS Server Error: %s\n", err)
-			}
-		}()
-	} else {
-		srv.Addr = ":8080"
-		log.Println("🔓 No certs found. Starting in HTTP mode on: 8080")
-		go func() {
-			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				log.Fatalf("❌ HTTP Server Error: %s\n", err)
-			}
-		}()
-	}
+	go func() {
+		log.Println("🔓 Starting in HTTP mode on: 8080")
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("❌ HTTP Server Error: %s\n", err)
+		}
+	}()
 
 	// Wait for interrupt signal to gracefully shutdown the server with a timeout of 5 seconds.
 	quit := make(chan os.Signal, 1)
