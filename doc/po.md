@@ -56,3 +56,55 @@ To maintain a zero-cost operational model, the system leverages the Google Searc
 * **Financial Safety:** As a Product Owner, I want the system to automatically halt searches when the 100-query limit is reached, so that I do not incur unexpected API charges.
 * **Transparency:** As a User, I want to be notified if my search is delayed due to daily quota limits, so I understand why my request hasn't been processed yet.
 * **Efficiency:** As a Developer, I want to log every successful search against the daily quota, so I can audit usage patterns and plan for future scaling (e.g., adding multiple API keys).
+
+---
+
+### **7. Definition of Done (DoD)**
+
+A feature or task is considered **"Done"** only when it meets the following criteria across development and product standards:
+
+#### **A. Code & Logic (Technical Standard)**
+- [ ] **Functional Requirement:** The Go code performs the task as described in the User Story (e.g., the quota check correctly blocks requests after 100).
+- [ ] **Database Integrity:** All state changes (switching job status) are successfully committed to MongoDB.
+- [ ] **Quota Accuracy:** For every Google Search performed, the `QuotaUsage` counter is incremented accurately for the current date.
+
+#### **B. Quality & Observability (Reliability Standard)**
+- [ ] **Error Handling:** The code includes guard clauses to handle empty queries, missing API keys, or database connection timeouts.
+- [ ] **Structured Logging:** Every major action (API calls, job dispatches) is recorded via the `internal/logger` and visible in `api.log`.
+- [ ] **Status Transparency:** A user can verify the result through the API endpoints and see the updated job status or found URLs.
+
+#### **C. Documentation (Portfolio Standard)**
+- [ ] **PRD Updated:** Any new feature logic is added to the "Key Features" or "Roadmap" section of this document.
+- [ ] **README Alignment:** The root `README.md` is updated if there is a change to the tech stack or core project value.
+
+---
+
+### **8. Product Backlog & Task Tracking**
+
+This section tracks pending features and technical improvements. Tasks are moved to "Completed" once they meet the Definition of Done (Section 7).
+
+#### **🔥 High Priority (Sprint 1)**
+- [ ] **Dynamic Query Injection:** Update `seeder.go` to process the actual `Query` field from the API instead of the hardcoded "pet friendly" string.
+- [ ] **Daily Quota Reset Logic:** Implement a robust check to ensure the `QuotaUsage` count resets to 0 when the date changes.
+- [ ] **Basic Error Mapping:** Ensure the API returns a clear message when the Google Search quota is exhausted.
+
+#### **⚡ Medium Priority (Sprint 2)**
+- [ ] **Multi-Result Storage:** Allow the system to process and save more than 1 result per search (currently hardcoded to 1).
+- [ ] **Search Metadata Persistence:** Save snippets and page titles from Google results into MongoDB, not just the URL.
+
+#### **❄️ Future Ideas (Icebox)**
+- [ ] **Notification System:** Integrate Slack or Email alerts for completed high-priority jobs.
+- [ ] **User Dashboard:** Create a simple interface to manage search tasks without using terminal commands.
+
+#### **✅ Completed Tasks (Proven Features)**
+
+These features are already fully implemented in the Go codebase and meet our current technical standards:
+
+- [x] **🏗️ Distributed Architecture:** Successfully decoupled the system into an **API Service** (Management) and a **Seeder Service** (Worker) using a microservices-style pattern.
+- [x] **🔍 Google Search Integration:** Implemented live data fetching using the official Google Custom Search JSON API.
+- [x] **🛡️ Quota Governance:** Developed the core logic to enforce the **100-request daily limit**, protecting the project from unexpected API costs.
+- [x] **🗄️ Database Foundation:** Established a robust MongoDB connection to persist search tasks and track real-time quota usage.
+- [x] **🔄 Job Lifecycle Management:** Built a state machine to track tasks through various stages: `pending` ➡️ `processing` ➡️ `done` or `failed`.
+- [x] **📑 Structured Logging:** Integrated a professional logging system (Zap + Lumberjack) to provide audit trails and automatic file rotation for `api.log`.
+- [x] **📡 RESTful API Endpoints:** Developed GIN-based routes allowing users to query job statuses and update data programmatically.
+- [x] **🐳 Containerization:** Fully dockerized the environment with `compose.yml` for seamless deployment across different machines.
