@@ -87,29 +87,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// ====================
-	// [OLD CODE]
-	// This was the old "Infinite Loop" that pulled data.
-	/*
-		reloadSig := make(chan os.Signal, 1)
-		signal.Notify(reloadSig, syscall.SIGUSR1)
-
-		go func() {
-			for {
-				<-reloadSig
-				log.Println("🔄 [Config] Signal received! Reloading configuration...")
-				loadConfig()
-				log.Printf("✨ [Config] Reload complete. Limit: %d", getMaxResults())
-			}
-		}()
-
-		for {
-			runSeederCycle()
-			log.Println("⏳ Waiting 10s before next cycle... (Send SIGUSR1 to reload config)")
-			time.Sleep(10 * time.Second)
-		}
-	*/
-	// =====================
 }
 
 // [NEW HANDLER] triggerd by API.
@@ -167,108 +144,6 @@ func performSearchAndReport(req SeederRequest) {
 
 	updateAPI(req.ID, status, totalResults, len(links))
 }
-
-// [OLD CODE] ===============
-// This function is no longer called
-/*
-func runSeederCycle() {
-	var currentQuery string
-	var taskID string
-
-	if getUseDynamicSearch() {
-		log.Println("🔄 Mode: Dynamic (Asking API for work)")
-
-		// Claim a Search Task from the API
-		task, err := claimSearchTask("")
-		if err != nil {
-			log.Printf("⚠️ No pending search tasks found: %v", err)
-			log.Println("💡 Tip: Add a task via POST /search first, or I will stop here.")
-			return
-		}
-
-		currentQuery = task.Query
-		taskID = task.ID
-		log.Printf("🚀 [Seeder] Claimed Task: '%s' (ID: %s)", currentQuery, taskID)
-	} else {
-		log.Println("🔧 Mode: Manual (Using hardcoded query)")
-		currentQuery = getManualQuery()
-		taskID = "manual-run"
-		log.Printf("🚀 [Seeder] Starting Manual Run: '%s'", currentQuery)
-	}
-
-	// 4. Perform Search
-	links, totalResults, err := googleSearch(currentQuery, true)
-	if err != nil {
-		log.Printf("❌ Search failed: %v", err)
-		// Report failure back to API? For now just stop.
-		return
-	}
-
-	log.Printf("✅ [Search] Found %d links. Google Est: %s", len(links), totalResults)
-
-	// 5. Filter & Send to Queue API
-	count := 0
-	limit := getMaxResults()
-
-	for _, link := range links {
-		// Safety Brake logic
-		if count >= MaxResultsToProcess {
-			log.Printf("🛑 [Limit] Reached testing limit of %d. Stopping.", MaxResultsToProcess)
-			break
-		}
-		if isSocialMedia(link) {
-			log.Printf("🚫 [Filter] Skipping Social Media: %s", link)
-			continue
-		}
-
-		log.Printf("📤 [Queue] Sending: %s", link)
-		if err := sendToQueue(link); err != nil {
-			log.Printf("⚠️ [Queue] Failed to send %s: %v", link, err)
-		} else {
-			count++
-			// Polite deplay between API calls during testing
-			time.Sleep(1 * time.Second)
-		}
-	}
-
-
-	if getUseDynamicSearch() {
-		if err := updateSearchTask(taskID, "done", totalResults, count); err != nil {
-			log.Printf("❌ Failed to update task status: %v", err)
-		} else {
-			log.Println("🏁 Task completed and updated.")
-		}
-	} else {
-		log.Println("🏁 Manual run completed.")
-	}
-}
-
-func claimSearchTask(query string) (*SearchTask, error) {
-	reqData := map[string]string{"query": query}
-	jsonData, _ := json.Marshal(reqData)
-	url := getAPIQueueURL() + "/search/claim"
-	resp, err := http.Post(url, "application/json", bytes.NewBuffer(jsonData))
-	if err != nil { return nil, err }
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("api status %d", resp.StatusCode)
-	}
-
-	var apiResp SearchTaskResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, err
-	}
-
-	if apiResp.Task == nil {
-		return nil, fmt.Errorf("empty task received")
-	}
-
-	return apiResp.Task, nil
-}
-*/
 
 // ... (Getters) ...
 func getGoogleAPIKey() string {
