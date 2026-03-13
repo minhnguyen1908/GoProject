@@ -38,8 +38,9 @@ var (
 
 // [NEW MODELS] ----
 type SeederRequest struct {
-	ID    string `json:"id"`
-	Query string `json:"query"`
+	ID         string `json:"id"`
+	Query      string `json:"query"`
+	MaxResults int    `json:"max_results"` //2026-03-13: added new value. Get max_results from Mongo.
 }
 
 // The Payload structure (Must match what the API expects)
@@ -97,7 +98,7 @@ func processHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("📥 [Seeder] Received Job: %s", req.Query)
+	log.Printf("📥 [Seeder] Received Job: %s (Limit: %d)", req.Query, req.MaxResults) //2026-03-13: added new MaxResults. Get the max search results from Mongo.
 
 	// Reply OK immediately
 	w.WriteHeader(http.StatusOK)
@@ -115,6 +116,14 @@ func performSearchAndReport(req SeederRequest) {
 	// We pass 'true' for debug to see the raw response log!
 	links, totalResults, err := googleSearch(req.Query, true)
 
+	//2026-03-12: get MaxResults from Mongo.
+	// Determine the limit: Use request limit if > 0, otherwise use global config
+	limit := req.MaxResults
+	if limit <= 0 {
+		limit = getMaxResults() // Fallback to .env/global value
+	}
+	//2026-03-13 - END.
+
 	status := "done"
 	if err != nil {
 		log.Printf("❌ [Seeder] Search Failed: %v", err)
@@ -125,7 +134,7 @@ func performSearchAndReport(req SeederRequest) {
 		// [RESTORED LOGIC]: Sending links to queue is kept active!
 		count := 0
 		for _, link := range links {
-			if count >= MaxResultsToProcess {
+			if count >= limit { //2026-03-13: Change from MaxResultsToProcess to limit (get from Mongo).
 				break
 			}
 			if isSocialMedia(link) {

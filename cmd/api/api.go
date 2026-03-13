@@ -88,6 +88,23 @@ var searchCol *mongo.Collection
 var quotaCol *mongo.Collection
 var mongoClient *mongo.Client
 
+// 2026-03-13
+// CreateJobRequest is the "Template" for what the user sends us via POST
+type CreateJobRequest struct {
+	Query      string `json:"query" binding:"required"` // The search string (Mandatory!)
+	MaxResults int    `json:"max_results"`              // How many results they want (Optional)
+}
+
+// CreateJobResponse is the "Template" for the HATEOAS response we send back
+type CreateJobResponse struct {
+	Message      string `json:"message"`
+	TaskID       string `json:"task_id"`
+	CurrentQuota int    `json:"current_quota"`
+	Links        []Link `json:"_links"` // Our HATEOAS links
+}
+
+// 2026-03-13 - END
+
 // ==========================================
 // Main function
 // ==========================================
@@ -121,6 +138,11 @@ func main() {
 	// Quota Routes
 	r.GET("/quota/google", getQuotaHandler)
 	r.POST("/quota/google/increment", incrementQuotaHandler)
+
+	//2026-03-13
+	// Add this line so Gin knows to send POST requests to our new function
+	r.POST("/queue", createJobHandler)
+	//2026-03-13 - END
 
 	// SERVER SETUP (GRACEFUL SHUTDOWN)
 
@@ -811,3 +833,71 @@ func handleDBError(c *gin.Context, err error, logPrefix string) bool {
 	}
 	return false
 }
+
+// 2026-03-13
+// Add new function to receive user request 'search string', number of search, and write to Mongo.
+func createJobHandler(c *gin.Context) {
+	var req CreateJobRequest
+
+	// 1. Bind JSON
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing mandatory field: 'query'"})
+		return
+	}
+
+	// 2. REAL Quota Check (Using your existing logic pattern)
+	today := time.Now().Format("2025-12-17") // Matches your code's date format
+	var usage QuotaUsage
+	err := quotaCol.FindOne(c.Request.Context(), bson.M{"_id": "google_search", "date": today}).Decode(&usage)
+
+	currentCount := 0
+	if err == nil {
+		currentCount = usage.Count
+	}
+	remaining := GoogleDailyLimit - currentCount
+
+	if remaining <= 0 {
+		c.JSON(http.StatusTooManyRequests, gin.H{"error": "Daily quota exhausted"})
+		return
+	}
+
+	// 3. Create the SearchTask (Using your SearchTask struct)
+	newTask := SearchTask{
+		ID:        primitive.NewObjectID(),
+		Query:     req.Query,
+		Status:    StatusPending,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// 4. Save to searchCol (The correct collection for dispatcher)
+	_, err = searchCol.InsertOne(c.Request.Context(), newTask)
+	if err != nil {
+		log.Printf("❌ [Search] Insert Error: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		return
+	}
+
+	// 5. TRIGGER THE DISPATCHER
+	// If Seeder is busy, dispatchJob() will see 'StatusProcessing' in Mongo
+	// and will NOT trigger the seeder again. This maintains your flow!
+	go dispatchJob()
+
+	// 6. Response
+	message := "Task queued."
+	if req.MaxResults <= 0 {
+		message += " Searching until limit."
+	}
+
+	c.JSON(http.StatusCreated, CreateJobResponse{
+		Message:      message,
+		TaskID:       newTask.ID.Hex(),
+		CurrentQuota: remaining,
+		Links: []Link{
+			{Rel: "self", Method: "GET", HRef: "/search"},
+			{Rel: "quota", Method: "GET", HRef: "/quota/google"},
+		},
+	})
+}
+
+//2026-03-13 - END
