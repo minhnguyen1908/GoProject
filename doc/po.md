@@ -84,9 +84,9 @@ A feature or task is considered **"Done"** only when it meets the following crit
 This section tracks pending features and technical improvements. Tasks are moved to "Completed" once they meet the Definition of Done (Section 7).
 
 #### **🔥 High Priority (Sprint 1)**
-- [ ] **Dynamic Query Injection:** Update `seeder.go` to process the actual `Query` field from the API instead of the hardcoded "pet friendly" string.
 - [ ] **Daily Quota Reset Logic:** Implement a robust check to ensure the `QuotaUsage` count resets to 0 when the date changes.
 - [ ] **Basic Error Mapping:** Ensure the API returns a clear message when the Google Search quota is exhausted.
+- [ ] **Implement Task Creation API:** Create a `POST /queue` endpoint in `api.go` to allow users to inject new search queries into MongoDB dynamically.
 
 #### **⚡ Medium Priority (Sprint 2)**
 - [ ] **Multi-Result Storage:** Allow the system to process and save more than 1 result per search (currently hardcoded to 1).
